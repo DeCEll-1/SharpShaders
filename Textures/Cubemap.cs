@@ -43,7 +43,8 @@ namespace SharpShaders.Textures
             Back    =   inTextures[4];      Front   =     inTextures[5];      
             #pragma warning restore format
         }
-        public Cubemap(Texture right, Texture left, Texture top, Texture bottom, Texture back, Texture front)
+        //                     x+             x-            y+           y-              z+             z-
+        public Cubemap(Texture right, Texture left, Texture top, Texture bottom, Texture front, Texture back)
         {
             #pragma warning disable format
             Right   =   right;              Left    =     left;

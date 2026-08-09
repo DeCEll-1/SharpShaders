@@ -16,7 +16,7 @@ namespace SharpShaders
         private static double CurrTimeGLFW => GLFW.GetTime();
         public static TimeSpan CurrTime => TimeSpan.FromSeconds(CurrTimeGLFW);
         public static TextWriter LibLogWriter { get => Logger.Writer; set => Logger.Writer = value; }
-        private static GameWindow window;
+        private static GameWindow? window;
         internal static readonly Vector2i windowSize = new(1, 1);
         public static void OpenOGL()
         {
@@ -38,7 +38,8 @@ namespace SharpShaders
 
         public static void CloseOGLContext()
         {
-            window.Dispose();
+            if (window != null)
+                window.Dispose();
         }
 
     }
