@@ -75,7 +75,7 @@ namespace SharpShaders.Textures
             {
                 Texture tex = textures[i]; // set the cube map type of the texture
                 tex.Target = TextureTarget.TextureCubeMapPositiveX + i;
-                tex.flipped = false;
+                //tex.flipped = false;
                 // init it while we are binded to the cubemap, which will attatch the texture to the cubemap
                 tex.Init(name: faceNames[i], isCubemap: true, cubemapHandle: this.Handle);
             }
