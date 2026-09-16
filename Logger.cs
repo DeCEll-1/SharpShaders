@@ -1,13 +1,4 @@
-﻿using OpenTK.Mathematics;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection.Metadata;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace SharpShaders
+﻿namespace SharpShaders
 {
     internal class Logger
     {
@@ -30,9 +21,9 @@ namespace SharpShaders
 
         public static void LogWithoutGLErrorCheck(string info)
         {
-            LogReal(info);
+            LogWithIndent(info);
         }
-        private static void LogReal(string info)
+        private static void LogWithIndent(string info)
         {
             string text = Indent + info;
             Writer.WriteLine(text);

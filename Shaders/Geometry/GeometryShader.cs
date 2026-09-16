@@ -8,7 +8,7 @@
             this.vertexSource = "#version 330 core\n" + vertexSource;
             this.fragmentSource = "#version 330 core\n" + fragmentSource;
             this.geometrySource = "#version 330 core\n" + geometrySource;
-            this.name = name ?? "";
+            this.Name = name ?? "";
         }
         private void InitGeometry()
         {

@@ -59,12 +59,12 @@ namespace SharpShaders.Textures
             GL.BindTexture(TextureTarget.TextureCubeMap, Handle);
 
 
-            if (textures.Any(tex => tex.initalised == true))
+            if (textures.Any(tex => tex.Initialized == true))
             { // check if any of the textures are initalized, we need them to not be initalized
                 string initalisedTextures = "";
                 foreach (Texture tex in textures)
                 {
-                    if (tex.initalised)
+                    if (tex.Initialized)
                         initalisedTextures += $"{tex.Handle}, ";
                 }
 

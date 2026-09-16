@@ -1,17 +1,46 @@
 ﻿using ImageMagick;
-using System.Buffers;
 
 namespace SharpShaders.Textures
 {
+    /// <summary>
+    /// Represents a managed wrapper for an OpenGL texture resource, providing methods
+    /// to bind, activate, read back raw pixel data, save images, and manage resource disposal.
+    /// </summary>
     public partial class Texture : IDisposable
     {
+        /// <summary>
+        /// Gets or sets the native OpenGL handle for this texture instance.
+        /// </summary>
         public int Handle { get; set; }
-        public bool initalised = false;
-        public int width, height;
+
+        /// <summary>
+        /// Indicates whether the texture has been initialized and allocated on the GPU context.
+        /// </summary>
+        public bool Initialized = false;
+
+        /// <summary>
+        /// The width of the texture in pixels.
+        /// </summary>
+        public int Width;
+
+        /// <summary>
+        /// The height of the texture in pixels.
+        /// </summary>
+        public int Height;
+
+        /// <summary>
+        /// Gets a value indicating whether this instance has been disposed.
+        /// </summary>
         public bool disposed { get; private set; } = false;
 
         #region opengl functions
-        public void Paramater(TextureParameterName name, int param)
+
+        /// <summary>
+        /// Sets a texture parameter for the currently bound texture target.
+        /// </summary>
+        /// <param name="name">The texture parameter to adjust.</param>
+        /// <param name="param">The value to set for the specified parameter.</param>
+        public void Parameter(TextureParameterName name, int param)
         {
             GL.TexParameter(
                 this.Target,
@@ -19,94 +48,87 @@ namespace SharpShaders.Textures
                 param
             );
         }
+
+        /// <summary>
+        /// Verifies whether the texture has been initialized and logs a warning if it has not.
+        /// </summary>
         private void Check()
         {
-            if (initalised)
+            if (Initialized)
                 return;
             Logger.Log($"Texture {Handle} used without initalisation");
         }
 
+        /// <summary>
+        /// Binds this texture to its associated <see cref="Target"/> in the active OpenGL context.
+        /// </summary>
         public void Bind()
         {
             Check();
             GL.BindTexture(this.Target, Handle);
         }
 
+        /// <summary>
+        /// Selects and activates the specified OpenGL texture unit.
+        /// </summary>
+        /// <param name="unit">The texture unit to activate (e.g., <see cref="TextureUnit.Texture0"/>).</param>
         public void Activate(TextureUnit unit)
         {
             Check();
             GL.ActiveTexture(unit);
         }
+
         #endregion
 
+        /// <summary>
+        /// Downloads and returns the raw RGBA pixel byte array directly from the GPU video memory.
+        /// </summary>
+        /// <returns>A byte array containing 4-channel (RGBA) pixel color data for the texture.</returns>
         public byte[] GetBytes()
         {
-            byte[] output = new byte[
-                4 *
-                width *
-                height
-            ];
+            int components = (PixelFormat == PixelFormat.Rgb || PixelFormat == PixelFormat.Bgr) ? 3 : 4;
+            byte[] output = new byte[components * Width * Height];
 
-            unsafe
-            {
-                fixed (byte* outputPtr = output)
-                {
-                    Bind();
-                    GL.GetTexImage(
-                        TextureTarget.Texture2D,
-                        0,
-                        PixelFormat.Rgba,
-                        PixelType.UnsignedByte,
-                        (nint)outputPtr
-                    );
-                }
-            }
+            Bind();
+            GL.GetTexImage(this.Target, 0, this.PixelFormat, this.PixelType, output);
 
             return output;
         }
 
+        /// <summary>
+        /// Exports the GPU texture data to a local image file on disk (supports PNG and JPEG formats).
+        /// </summary>
+        /// <param name="filePath">The target file path where the image will be written.</param>
         public void SaveToFile(string filePath)
         {
-            MagickFormat format = MagickFormat.Rgb;
-            if (this.PixelFormat == PixelFormat.Rgba)
-            {
-                format = MagickFormat.Rgba;
-            }
+            MagickFormat pixelMapping = (this.PixelFormat == PixelFormat.Rgb || this.PixelFormat == PixelFormat.Bgr)
+                ? MagickFormat.Rgb
+                : MagickFormat.Rgba;
 
-            // Create MagickReadSettings for raw pixel data (assuming RGBA)
             var settings = new MagickReadSettings
             {
-                Width = (uint?)width,
-                Height = (uint?)height,
-                Format = format,
+                Width = (uint?)Width,
+                Height = (uint?)Height,
+                Format = pixelMapping
             };
-            using var ms = new MemoryStream(GetBytes());
-            using var image = new MagickImage(ms, settings);
 
-
-            // Flip vertically
+            using var image = new MagickImage(GetBytes(), settings);
             image.Flip();
 
-            // Save as JPEG or PNG depending on file extension
-            if (filePath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                filePath.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
-            {
-                image.Format = MagickFormat.Jpeg;
-                image.Write(filePath);
-            }
-            else
-            {
-                image.Format = MagickFormat.Png;
-                image.Write(filePath);
-            }
+            image.Format = (filePath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                            filePath.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
+                ? MagickFormat.Jpeg
+                : MagickFormat.Png;
 
-
-            Logger.Log(
-                $"Saved Texture with {Handle} as {filePath}"
-            );
+            image.Write(filePath);
+            Logger.Log($"Saved Texture {Handle} as {filePath}");
         }
 
         #region disposal
+
+        /// <summary>
+        /// Finalizes an instance of the <see cref="Texture"/> class and warns if the GPU resource was leaked.
+        /// </summary>
         ~Texture()
         {
             if (disposed == false)
@@ -115,27 +137,41 @@ namespace SharpShaders.Textures
                 );
         }
 
+        /// <summary>
+        /// Releases unmanaged OpenGL texture resources and optionally logs disposal.
+        /// </summary>
+        /// <param name="disposing">
+        /// <c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.
+        /// </param>
+        /// <param name="log">Controls whether a disposal confirmation message is written to <see cref="Logger"/>.</param>
         protected virtual void Dispose(bool disposing, bool log = true)
         {
             if (!disposed)
             {
-
                 GL.DeleteTexture(Handle);
                 if (log)
                     Logger.Log(
-                        $"Disposed Texture {Handle} {(name != "" ? $", named {name}" : "")}"
-                );
+                        $"Disposed Texture {Handle} {(Name != "" ? $", named {Name}" : "")}"
+                    );
                 Handle = 0;
                 disposed = true;
             }
         }
+
+        /// <summary>
+        /// Controls whether disposal messages are emitted to <see cref="Logger"/> when <see cref="Dispose()"/> is invoked.
+        /// </summary>
         public bool logDisposal = true;
 
+        /// <summary>
+        /// Releases all unmanaged GPU resources used by the <see cref="Texture"/> and suppresses finalization.
+        /// </summary>
         public void Dispose()
         {
             Dispose(true, logDisposal);
             GC.SuppressFinalize(this);
         }
+
         #endregion
     }
 }

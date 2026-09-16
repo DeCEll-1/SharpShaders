@@ -7,7 +7,7 @@ namespace SharpShaders.Shaders
         public bool initalised = false;
         public string vertexSource { get; private set; }
         public string fragmentSource { get; private set; }
-        public string name { get; set; }
+        public string Name { get; set; }
         public int Handle { get; set; }
         private bool disposed = false;
         public ShaderUniformManager UniformManager;
@@ -16,7 +16,7 @@ namespace SharpShaders.Shaders
         {
             this.vertexSource = "#version 330 core\n" + vertexSource;
             this.fragmentSource = "#version 330 core\n" + fragmentSource;
-            this.name = name ?? "";
+            this.Name = name ?? "";
         }
 
         public Shader Init()
@@ -89,7 +89,7 @@ namespace SharpShaders.Shaders
             }
 
             Logger.Log(
-                $"Compiled {type} for {Handle} :{(string.IsNullOrEmpty(name) ? "" : " " + name)} in {Logger.EndTimingBlockFormatted()}"
+                $"Compiled {type} for {Handle} :{(string.IsNullOrEmpty(Name) ? "" : " " + Name)} in {Logger.EndTimingBlockFormatted()}"
             );
 
             Logger.PopIndentLevel();

@@ -152,10 +152,10 @@ namespace SharpShaders.Textures
                 .WriteLine($"Color attachments: {ColorAttachmentCount}");
                 for (int i = 0; i < ColorAttachmentCount; i++)
                 {
-                    l.WriteLine("name: " + ColorAttachments[i].name + " handle: " + ColorAttachments[i].Handle);
+                    l.WriteLine("name: " + ColorAttachments[i].Name + " handle: " + ColorAttachments[i].Handle);
                 }
                 l.WriteLine($"Depth/Stencil handle: " +
-                $"{DepthStencilTexture.Handle} sized {DepthStencilTexture.width}x{DepthStencilTexture.height}")
+                $"{DepthStencilTexture.Handle} sized {DepthStencilTexture.Width}x{DepthStencilTexture.Height}")
                 .WriteLine($"in {Logger.EndTimingBlockFormatted()}")
                 .Log();
 
