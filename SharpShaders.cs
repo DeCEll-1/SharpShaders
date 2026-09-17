@@ -3,7 +3,6 @@ global using static SharpShaders.Misc;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
-using OpenTK.Windowing.GraphicsLibraryFramework;
 
 namespace SharpShaders
 {
@@ -36,6 +35,16 @@ namespace SharpShaders
         {
             if (window != null)
                 window.Dispose();
+        }
+
+        public static unsafe ErrorCode GetLastError()
+        {
+            OpenTK.Windowing.GraphicsLibraryFramework.Window* window = OpenTK.Windowing.GraphicsLibraryFramework.GLFW.GetCurrentContext();
+            if (window != null)
+            {
+                return GL.GetError();
+            }
+            return ErrorCode.NoError;
         }
 
     }

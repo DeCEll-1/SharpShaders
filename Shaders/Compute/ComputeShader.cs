@@ -23,6 +23,11 @@ namespace SharpShaders.Shaders.Compute
 
         /// <summary>Manages uniform variables for this compute shader program.</summary>
         public ShaderUniformManager UniformManager;
+        /// <summary>
+        /// Gets an optional debug identifier name assigned to this texture instance.
+        /// </summary>
+        public string Name { get; private set; } = "";
+
 
         private bool disposed = false;
 
@@ -46,11 +51,12 @@ namespace SharpShaders.Shaders.Compute
         /// <exception cref="InvalidOperationException">
         /// Thrown if no active OpenGL context is bound to the current calling thread.
         /// </exception>
-        public ComputeShader(string computeShaderSource)
+        public ComputeShader(string computeShaderSource, string name = "")
         {
             ArgumentNullException.ThrowIfNullOrEmpty(computeShaderSource);
 
             this.computeShaderSource = computeShaderSource;
+            this.Name = name;
             Init();
         }
 
@@ -214,6 +220,7 @@ namespace SharpShaders.Shaders.Compute
         {
             Use();
             GL.DispatchCompute(x, y, z);
+            Logger.Log($"Dispatched {Handle}, named {Name} for {x}, {y}, {z} with group size {groupSize.ToString()}");
         }
 
         /// <summary>
