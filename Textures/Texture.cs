@@ -81,38 +81,55 @@ namespace SharpShaders.Textures
         #endregion
 
         /// <summary>
-        /// Downloads and returns the raw RGBA pixel byte array directly from the GPU video memory.
+        /// Downloads and returns the raw pixel byte array directly from GPU memory.
+        /// Supports byte, float, single-channel, and multi-channel textures.
         /// </summary>
-        /// <returns>A byte array containing 4-channel (RGBA) pixel color data for the texture.</returns>
         public byte[] GetBytes()
         {
-            int components = (PixelFormat == PixelFormat.Rgb || PixelFormat == PixelFormat.Bgr) ? 3 : 4;
-            byte[] output = new byte[components * Width * Height];
+            int bytesPerComponent = GetBytesPerComponent(this.PixelType);
+            int components = GetComponentsCount(this.PixelFormat);
+            int bytesPerPixel = components * bytesPerComponent;
+
+            byte[] output = new byte[Width * Height * bytesPerPixel];
 
             Bind();
+
+            // Prevent row alignment issues for odd width textures or single-channel data
+            GL.GetInteger(GetPName.PackAlignment, out int previousAlignment);
+            GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+
             GL.GetTexImage(this.Target, 0, this.PixelFormat, this.PixelType, output);
+
+            // Restore previous alignment state
+            GL.PixelStore(PixelStoreParameter.PackAlignment, previousAlignment);
 
             return output;
         }
 
         /// <summary>
-        /// Exports the GPU texture data to a local image file on disk (supports PNG and JPEG formats).
+        /// Exports the GPU texture data to a local image file on disk.
         /// </summary>
-        /// <param name="filePath">The target file path where the image will be written.</param>
         public void SaveToFile(string filePath)
         {
-            MagickFormat pixelMapping = (this.PixelFormat == PixelFormat.Rgb || this.PixelFormat == PixelFormat.Bgr)
-                ? MagickFormat.Rgb
-                : MagickFormat.Rgba;
+            byte[] rawBytes = GetBytes();
 
-            var settings = new MagickReadSettings
+            // Use PixelReadSettings to specify dimensions, storage type, and channel mapping
+            var settings = new PixelReadSettings(
+                (uint)Width,
+                (uint)Height,
+                GetStorageType(this.PixelType),
+                GetPixelMapping(this.PixelFormat)
+            );
+
+            // Read raw pixel bytes using PixelReadSettings
+            using var image = new MagickImage(rawBytes, settings);
+
+            // Normalize high dynamic range float data (like R32F) down to visible display bounds
+            if (this.PixelType == PixelType.Float || this.PixelType == PixelType.HalfFloat)
             {
-                Width = (uint?)Width,
-                Height = (uint?)Height,
-                Format = pixelMapping
-            };
+                image.Normalize();
+            }
 
-            using var image = new MagickImage(GetBytes(), settings);
             image.Flip();
 
             image.Format = (filePath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||

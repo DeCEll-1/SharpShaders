@@ -1,4 +1,5 @@
 ﻿global using OpenTK.Graphics.OpenGL;
+global using static SharpShaders.Misc;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
