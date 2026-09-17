@@ -2,11 +2,13 @@
 {
     internal class Logger
     {
+        // doing it this way instead of using field works on any SDK (and it's used for a project built for 8.0 anyway) --snark5885
+        private static TextWriter writer = TextWriter.Synchronized(TextWriter.Null);
         internal static TextWriter Writer
         {
-            get;
-            set => field = TextWriter.Synchronized(value ?? TextWriter.Null);
-        } = TextWriter.Synchronized(TextWriter.Null);
+            get => writer;
+            set => writer = TextWriter.Synchronized(value ?? TextWriter.Null);
+        }
         public static unsafe void Log(string info)
         {
             OpenTK.Windowing.GraphicsLibraryFramework.Window* window = OpenTK.Windowing.GraphicsLibraryFramework.GLFW.GetCurrentContext();
