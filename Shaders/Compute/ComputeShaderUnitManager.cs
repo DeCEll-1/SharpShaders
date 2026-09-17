@@ -68,7 +68,7 @@ namespace SharpShaders.Shaders.Compute
         /// <param name="unit">The GLSL <c>binding = unit</c> index.</param>
         /// <param name="access">Memory access type (<c>ReadWrite</c>, <c>ReadOnly</c>, or <c>WriteOnly</c>).</param>
         /// <param name="format">Matching sized internal texture format.</param>
-        public void SetImageTexture(
+        public ComputeShaderUnitManager SetImageTexture(
             int texture,
             int unit,
             TextureAccess access = TextureAccess.ReadWrite,
@@ -79,12 +79,13 @@ namespace SharpShaders.Shaders.Compute
             imageBindings.RemoveAll(b => b.Unit == unit);
 
             imageBindings.Add(new ImageBinding(unit, texture, access, format));
+            return this;
         }
 
         /// <summary>
         /// Executes OpenGL bindings for all registered image textures to their respective units.
         /// </summary>
-        public void ApplyTextures()
+        public ComputeShaderUnitManager ApplyTextures()
         {
             foreach (var binding in imageBindings)
             {
@@ -98,6 +99,7 @@ namespace SharpShaders.Shaders.Compute
                     binding.Format // Must match texture's internal format
                 );
             }
+            return this;
         }
 
         // --- SSBO Management ---
@@ -106,7 +108,7 @@ namespace SharpShaders.Shaders.Compute
         /// Uploads an array of value-type elements to an SSBO binding point.
         /// Reuses existing OpenGL buffer handles when available.
         /// </summary>
-        public void SetSSBO<T>(T[] data, int binding, BufferUsageHint usage = BufferUsageHint.DynamicDraw) where T : unmanaged
+        public ComputeShaderUnitManager SetSSBO<T>(T[] data, int binding, BufferUsageHint usage = BufferUsageHint.DynamicDraw) where T : unmanaged
         {
             int byteCount = Unsafe.SizeOf<T>() * data.Length;
 
@@ -119,6 +121,7 @@ namespace SharpShaders.Shaders.Compute
             GL.BindBuffer(BufferTarget.ShaderStorageBuffer, buffer);
             GL.BufferData(BufferTarget.ShaderStorageBuffer, byteCount, data, usage);
             GL.BindBufferBase(BufferRangeTarget.ShaderStorageBuffer, binding, buffer);
+            return this;
         }
 
         #region dispose

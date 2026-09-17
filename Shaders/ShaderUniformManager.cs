@@ -46,100 +46,110 @@ namespace SharpShaders.Shaders
         /// <summary>
         /// Sets a <see cref="Matrix4"/> uniform variable in the shader program.
         /// </summary>
-        public void SetMatrix4(string name, Matrix4 matrix)
+        public ShaderUniformManager SetMatrix4(string name, Matrix4 matrix)
         {
             int loc = GetLocation(name);
             if (loc != -1)
             {
                 GL.UniformMatrix4(loc, true, ref matrix);
             }
+            return this;
         }
 
         /// <summary>
         /// Sets a 4-component floating-point vector (<see cref="Vector4"/>) uniform variable in the shader program.
         /// </summary>
-        public void SetVector4(string name, Vector4 vector)
+        public ShaderUniformManager SetVector4(string name, Vector4 vector)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform4(loc, vector);
+            return this;
         }
 
         /// <summary>
         /// Sets a 3-component floating-point vector (<see cref="Vector3"/>) uniform variable in the shader program.
         /// </summary>
-        public void SetVector3(string name, Vector3 vector)
+        public ShaderUniformManager SetVector3(string name, Vector3 vector)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform3(loc, vector);
+            return this;
         }
 
         /// <summary>
         /// Sets a 2-component floating-point vector (<see cref="Vector2"/>) uniform variable in the shader program.
         /// </summary>
-        public void SetVector2(string name, Vector2 vector)
+        public ShaderUniformManager SetVector2(string name, Vector2 vector)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform2(loc, vector);
+            return this;
         }
 
         /// <summary>
         /// Sets a single floating-point (<c>float</c>) uniform variable in the shader program.
         /// </summary>
-        public void SetFloat(string name, float value)
+        public ShaderUniformManager SetFloat(string name, float value)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform1(loc, value);
+            return this;
         }
 
         /// <summary>
         /// Sets a single integer (<c>int</c>) uniform variable in the shader program.
         /// </summary>
-        public void SetInt(string name, int value)
+        public ShaderUniformManager SetInt(string name, int value)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform1(loc, value);
+            return this;
         }
 
         /// <summary>
         /// Sets an array of floating-point values (<c>float[]</c>) uniform variable in the shader program.
         /// </summary>
-        public void SetFloatArray(string name, float[] values)
+        public ShaderUniformManager SetFloatArray(string name, float[] values)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform1(loc, values.Length, values);
+            return this;
         }
 
         /// <summary>
         /// Sets an array of integer values (<c>int[]</c>) uniform variable in the shader program.
         /// </summary>
-        public void SetIntArray(string name, int[] values)
+        public ShaderUniformManager SetIntArray(string name, int[] values)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform1(loc, values.Length, values);
+            return this;
         }
 
         /// <summary>
         /// Sets a 4-component RGBA color (<see cref="Color4"/>) uniform variable in the shader program.
         /// </summary>
-        public void SetColor4(string name, Color4 color)
+        public ShaderUniformManager SetColor4(string name, Color4 color)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform4(loc, color);
+            return this;
         }
 
         /// <summary>
         /// Sets a 3-component RGB color uniform variable in the shader program from a <see cref="Color4"/> object.
         /// </summary>
-        public void SetColor3(string name, Color4 color)
+        public ShaderUniformManager SetColor3(string name, Color4 color)
         {
             int loc = GetLocation(name);
             if (loc != -1) GL.Uniform3(loc, color.R, color.G, color.B);
+            return this;
         }
 
         /// <summary>
         /// Binds a 2D texture to a given texture unit and updates the sampler uniform in GLSL.
         /// </summary>
-        public void SetTexture(string name, Texture tex, TextureUnit unit)
+        public ShaderUniformManager SetTexture(string name, Texture tex, TextureUnit unit)
         {
             tex.Activate(unit);
             tex.Bind();
@@ -150,12 +160,13 @@ namespace SharpShaders.Shaders
                 int unitint = (int)unit - (int)TextureUnit.Texture0;
                 GL.Uniform1(loc, unitint);
             }
+            return this;
         }
 
         /// <summary>
         /// Binds a Cubemap texture to a given texture unit and updates the samplerCube uniform in GLSL.
         /// </summary>
-        public void SetCubemap(string name, Cubemap cubemap, TextureUnit unit)
+        public ShaderUniformManager SetCubemap(string name, Cubemap cubemap, TextureUnit unit)
         {
             cubemap.Activate(unit);
             cubemap.Bind();
@@ -166,6 +177,7 @@ namespace SharpShaders.Shaders
                 int unitint = (int)unit - (int)TextureUnit.Texture0;
                 GL.Uniform1(loc, unitint);
             }
+            return this;
         }
 
         #endregion
