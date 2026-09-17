@@ -8,7 +8,7 @@ namespace SharpShaders
 {
     public class SharpS
     {
-        private static double CurrTimeGLFW => GLFW.GetTime();
+        private static double CurrTimeGLFW => OpenTK.Windowing.GraphicsLibraryFramework.GLFW.GetTime();
         public static TimeSpan CurrTime => TimeSpan.FromSeconds(CurrTimeGLFW);
         public static TextWriter LibLogWriter { get => Logger.Writer; set => Logger.Writer = value; }
         private static GameWindow? window;
