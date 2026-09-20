@@ -1,4 +1,6 @@
 ﻿using ImageMagick;
+using System;
+using System.Runtime.InteropServices;
 
 namespace SharpShaders.Textures
 {
@@ -53,10 +55,8 @@ namespace SharpShaders.Textures
         /// </summary>
         public bool logCreation = true;
 
-        /// <summary>
-        /// Holds raw pixel payload bytes prior to GPU allocation during <see cref="Init"/>.
-        /// </summary>
-        private byte[]? bytes { get; set; }
+        private IntPtr nativeBytes { get; set; }
+        private int byteLength { get; set; }
 
         /// <summary>
         /// Gets an optional debug identifier name assigned to this texture instance.
@@ -69,10 +69,11 @@ namespace SharpShaders.Textures
         public Texture() { }
 
         /// <summary>
-        /// Loads an image file from the specified path into temporary memory.
+        /// Loads an image file from the specified path into temporary unmanaged memory.
         /// Call <see cref="Init"/> to compile and transfer the pixel data onto the GPU context.
         /// </summary>
         /// <param name="path">The file system path to the image asset.</param>
+        /// <param name="flipVertical">If set to <c>true</c>, flips the image vertically to match OpenGL UV coordinates.</param>
         /// <param name="target">The OpenGL texture binding target.</param>
         /// <param name="pixelInternalFormat">The pixel format used by the GPU internal storage.</param>
         /// <param name="pixelFormat">The pixel channel arrangement of the image data.</param>
@@ -81,9 +82,10 @@ namespace SharpShaders.Textures
         /// <param name="textureTWrapMode">The vertical texture coordinate wrap mode.</param>
         /// <param name="textureMinFilter">The minification sampling filter mode.</param>
         /// <param name="textureMagFilter">The magnification sampling filter mode.</param>
-        /// <returns>A uninitialized <see cref="Texture"/> instance ready for <see cref="Init"/>.</returns>
+        /// <returns>An uninitialized <see cref="Texture"/> instance ready for <see cref="Init"/>.</returns>
         public static Texture LoadFromFile(
             string path,
+            bool flipVertical = true,
             TextureTarget target = TextureTarget.Texture2D,
             PixelInternalFormat pixelInternalFormat = PixelInternalFormat.Rgba,
             PixelFormat pixelFormat = PixelFormat.Rgba,
@@ -93,20 +95,20 @@ namespace SharpShaders.Textures
             TextureMinFilter textureMinFilter = TextureMinFilter.Linear,
             TextureMagFilter textureMagFilter = TextureMagFilter.Linear
         )
-        => LoadFromTextureBytes(
-                   File.ReadAllBytes(path),
-                   target: target,
-                   pixelInternalFormat: pixelInternalFormat,
-                   pixelFormat: pixelFormat,
-                   type: type,
-                   textureSWrapMode: textureSWrapMode,
-                   textureTWrapMode: textureTWrapMode,
-                   textureMinFilter: textureMinFilter,
-                   textureMagFilter: textureMagFilter
-              );
+        {
+            using var image = new MagickImage(path);
+
+            if (flipVertical)
+                image.Flip();
+
+            return ProcessMagickImage(
+                image, target, pixelInternalFormat, pixelFormat, type,
+                textureSWrapMode, textureTWrapMode, textureMinFilter, textureMagFilter
+            );
+        }
 
         /// <summary>
-        /// Decodes encoded image bytes (e.g., PNG/JPEG file streams) using ImageMagick into uncompressed pixel data.
+        /// Decodes encoded image bytes (e.g., downloaded from network) using ImageMagick into uncompressed pixel data.
         /// </summary>
         /// <param name="bytes">Encoded image payload byte array.</param>
         /// <param name="flipVertical">If set to <c>true</c>, flips the image vertically to match OpenGL UV coordinates.</param>
@@ -118,7 +120,7 @@ namespace SharpShaders.Textures
         /// <param name="textureTWrapMode">Vertical texture coordinate wrapping option.</param>
         /// <param name="textureMinFilter">Minification sampling filter.</param>
         /// <param name="textureMagFilter">Magnification sampling filter.</param>
-        /// <returns>A uninitialized <see cref="Texture"/> instance populated with raw decompressed pixel bytes.</returns>
+        /// <returns>An uninitialized <see cref="Texture"/> instance populated with raw decompressed pixel bytes.</returns>
         public static Texture LoadFromTextureBytes(
             byte[] bytes,
             bool flipVertical = true,
@@ -132,20 +134,59 @@ namespace SharpShaders.Textures
             TextureMagFilter textureMagFilter = TextureMagFilter.Linear
         )
         {
-            using var ms = new MemoryStream(bytes);
-            using var image = new MagickImage(ms);
+            using var image = new MagickImage(bytes);
+
             if (flipVertical)
-            {
                 image.Flip();
-            }
 
-            using var pixelDataArray = image.GetPixels();
+            return ProcessMagickImage(
+                image, target, pixelInternalFormat, pixelFormat, type,
+                textureSWrapMode, textureTWrapMode, textureMinFilter, textureMagFilter
+            );
+        }
 
-            PixelMapping mapping = pixelFormat == PixelFormat.Rgb ? PixelMapping.RGB : PixelMapping.RGBA;
-            byte[] pixelArray = pixelDataArray.ToByteArray(0, 0, image.Width, image.Height, mapping)!;
+        /// <summary>
+        /// Processes a decoded <see cref="MagickImage"/>, configuring its color channels and extracting an unmanaged memory pointer to its pixel buffer.
+        /// </summary>
+        /// <param name="image">The decoded Magick.NET image instance.</param>
+        /// <param name="target">The OpenGL texture target.</param>
+        /// <param name="pixelInternalFormat">The internal GPU format to allocate.</param>
+        /// <param name="pixelFormat">The channel mapping to extract.</param>
+        /// <param name="type">The underlying component data type.</param>
+        /// <param name="textureSWrapMode">Horizontal texture coordinate wrapping option.</param>
+        /// <param name="textureTWrapMode">Vertical texture coordinate wrapping option.</param>
+        /// <param name="textureMinFilter">Minification sampling filter.</param>
+        /// <param name="textureMagFilter">Magnification sampling filter.</param>
+        /// <returns>An uninitialized <see cref="Texture"/> instance populated with an unmanaged memory block containing the pixel data.</returns>
+        private static unsafe Texture ProcessMagickImage(
+            MagickImage image,
+            TextureTarget target,
+            PixelInternalFormat pixelInternalFormat,
+            PixelFormat pixelFormat,
+            PixelType type,
+            TextureWrapMode textureSWrapMode,
+            TextureWrapMode textureTWrapMode,
+            TextureMinFilter textureMinFilter,
+            TextureMagFilter textureMagFilter)
+        {
+            image.ColorSpace = ColorSpace.sRGB;
+            int channels = pixelFormat == PixelFormat.Rgb ? 3 : 4;
+
+            if (channels == 4)
+                image.HasAlpha = true; // Forces RGBA layout
+
+            using var pixelData = image.GetPixelsUnsafe();
+
+            // Get a pointer directly to Magick.NET's internal memory
+            IntPtr ptr = pixelData.GetAreaPointer(0, 0, image.Width, image.Height);
+
+            // Calculate exact byte size (width * height * channels * (bytes per channel))
+            int bytesPerChannel = type == PixelType.UnsignedByte ? 1 : 4; // Assuming 8-bit or 32-bit floats
+            int lengthInBytes = (int)image.Width * (int)image.Height * channels * bytesPerChannel;
 
             return LoadFromBytes(
-                bytes: pixelArray,
+                sourcePtr: ptr,
+                lengthInBytes: lengthInBytes,
                 width: (int)image.Width,
                 height: (int)image.Height,
                 target: target,
@@ -160,9 +201,10 @@ namespace SharpShaders.Textures
         }
 
         /// <summary>
-        /// Constructs a <see cref="Texture"/> object around raw, uncompressed pixel color bytes.
+        /// Constructs a <see cref="Texture"/> object directly from an unmanaged memory pointer containing raw, uncompressed pixel color data.
         /// </summary>
-        /// <param name="bytes">Raw pixel color buffer array matching the target layout.</param>
+        /// <param name="sourcePtr">A pointer to the unmanaged memory block containing the raw pixel data.</param>
+        /// <param name="lengthInBytes">The total size of the pixel payload in bytes.</param>
         /// <param name="width">Texture width in pixels.</param>
         /// <param name="height">Texture height in pixels.</param>
         /// <param name="target">The target texture dimension type.</param>
@@ -174,8 +216,9 @@ namespace SharpShaders.Textures
         /// <param name="textureMinFilter">Minification filter behavior.</param>
         /// <param name="textureMagFilter">Magnification filter behavior.</param>
         /// <returns>An uninitialized <see cref="Texture"/> object ready for GPU upload via <see cref="Init"/>.</returns>
-        public static Texture LoadFromBytes(
-            byte[] bytes,
+        public unsafe static Texture LoadFromBytes(
+            IntPtr sourcePtr,
+            int lengthInBytes,
             int width,
             int height,
             TextureTarget target = TextureTarget.Texture2D,
@@ -189,7 +232,12 @@ namespace SharpShaders.Textures
         )
         {
             Texture texture = new();
-            texture.bytes = bytes;
+
+            texture.byteLength = lengthInBytes;
+            texture.nativeBytes = (IntPtr)NativeMemory.Alloc((nuint)lengthInBytes);
+
+            System.Buffer.MemoryCopy(sourcePtr.ToPointer(), texture.nativeBytes.ToPointer(), lengthInBytes, lengthInBytes);
+
             texture.Width = width;
             texture.Height = height;
             texture.Target = target;
@@ -211,7 +259,7 @@ namespace SharpShaders.Textures
         /// <param name="isCubemap">Indicates whether this texture initialization targets a CubeMap face context.</param>
         /// <param name="cubemapHandle">Existing OpenGL handle if <paramref name="isCubemap"/> is set to <c>true</c>.</param>
         /// <exception cref="InvalidOperationException">Thrown when OpenGL fails to generate a valid texture handle (returns 0).</exception>
-        public void Init(string? name = "", bool isCubemap = false, int cubemapHandle = -1)
+        public unsafe void Init(string? name = "", bool isCubemap = false, int cubemapHandle = -1)
         {
             Logger.BeginTimingBlock();
             var paramTarget = this.Target;
@@ -259,11 +307,16 @@ namespace SharpShaders.Textures
                 0,
                 this.PixelFormat,
                 this.PixelType,
-                bytes
+                nativeBytes
             );
             this.Initialized = true;
 
-            this.bytes = null;
+            if (this.nativeBytes != IntPtr.Zero)
+            {
+                NativeMemory.Free(this.nativeBytes.ToPointer());
+                this.nativeBytes = IntPtr.Zero;
+                this.byteLength = 0;
+            }
 
             this.Name = name ?? string.Empty;
             if (logCreation)
@@ -292,6 +345,7 @@ namespace SharpShaders.Textures
         public static Texture LoadFromSize(
             int width,
             int height,
+            int depth = 1, // Added depth parameter
             TextureTarget target = TextureTarget.Texture2D,
             PixelInternalFormat pixelInternalFormat = PixelInternalFormat.Rgba,
             PixelFormat pixelFormat = PixelFormat.Rgba,
@@ -320,6 +374,7 @@ namespace SharpShaders.Textures
             texture.Name = name ?? string.Empty;
             texture.Width = width;
             texture.Height = height;
+            texture.Depth = depth;
 
             if (texture.Handle == 0)
             {
@@ -332,54 +387,206 @@ namespace SharpShaders.Textures
 
             GL.TexParameter(target, TextureParameterName.TextureWrapS, (int)textureSWrapMode);
 
-            if (target == TextureTarget.Texture2D)
+            // Texture1DArray and Texture2DArray both use WrapT
+            if (target == TextureTarget.Texture2D || target == TextureTarget.Texture2DArray || target == TextureTarget.Texture3D)
                 GL.TexParameter(target, TextureParameterName.TextureWrapT, (int)textureTWrapMode);
 
             GL.TexParameter(target, TextureParameterName.TextureMinFilter, (int)textureMinFilter);
             GL.TexParameter(target, TextureParameterName.TextureMagFilter, (int)textureMagFilter);
-
             GL.TexParameter(target, TextureParameterName.TextureBaseLevel, 0);
             GL.TexParameter(target, TextureParameterName.TextureMaxLevel, 0);
 
             // Texture creation
             if (target == TextureTarget.Texture1D)
             {
-                GL.TexImage1D(
-                    target,
-                    0, // mipmap level
-                    pixelInternalFormat,
-                    width,
-                    0, // border
-                    pixelFormat,
-                    pixelType,
-                    nint.Zero // initialization pixels
-                );
+                GL.TexImage1D(target, 0, pixelInternalFormat, width, 0, pixelFormat, pixelType, nint.Zero);
             }
             else if (target == TextureTarget.Texture2D)
             {
-                GL.TexImage2D(
-                    target,
-                    0, // mipmap level
-                    pixelInternalFormat,
-                    width,
-                    height,
-                    0, // border
-                    pixelFormat,
-                    pixelType,
-                    nint.Zero // initialization pixels
-                );
+                GL.TexImage2D(target, 0, pixelInternalFormat, width, height, 0, pixelFormat, pixelType, nint.Zero);
+            }
+            else if (target == TextureTarget.Texture2DArray || target == TextureTarget.Texture3D)
+            {
+                // Texture arrays require TexImage3D, where depth represents the array slice count
+                GL.TexImage3D(target, 0, pixelInternalFormat, width, height, depth, 0, pixelFormat, pixelType, nint.Zero);
             }
 
             texture.Initialized = true;
 
             if (logCreation)
                 new LogBuilder()
-                .WriteLine("Loaded empty Texture ")
+                .Write("Loaded empty Texture ")
                 .Write(texture.Handle)
                 .Write((name != "" ? $", named {name}" : "") + " ")
-                .Write($"sized {width}x{height} in {Logger.EndTimingBlockFormatted()}")
+                .Write($"sized {width}x{height}x{depth} in {Logger.EndTimingBlockFormatted()}")
                 .Log();
+
             return texture;
+        }
+
+        /// <summary>
+        /// Loads a collection of image files from disk and packs them into a single GPU <see cref="Texture"/>.
+        /// <br/> Does not need <see cref="Init(string?, bool, int)"/>.
+        /// </summary>
+        /// <param name="paths">An array of file paths pointing to the source images to be loaded.</param>
+        /// <param name="flipVertical">If <c>true</c>, flips each image vertically upon loading to match OpenGL coordinate conventions. Defaults to <c>true</c>.</param>
+        /// <param name="pixelInternalFormat">The internal sizing and format storage used by the GPU for the texture array. Defaults to <see cref="PixelInternalFormat.Rgba"/>.</param>
+        /// <param name="pixelFormat">The format of the pixel data contained in the source images. Defaults to <see cref="PixelFormat.Rgba"/>.</param>
+        /// <param name="type">The datatype of the pixel components (e.g., unsigned byte, float). Defaults to <see cref="PixelType.UnsignedByte"/>.</param>
+        /// <param name="textureSWrapMode">The texture wrapping mode for the S (horizontal) coordinate. Defaults to <see cref="TextureWrapMode.Repeat"/>.</param>
+        /// <param name="textureTWrapMode">The texture wrapping mode for the T (vertical) coordinate. Defaults to <see cref="TextureWrapMode.Repeat"/>.</param>
+        /// <param name="textureMinFilter">The minification filter used when scaling the texture down. Defaults to <see cref="TextureMinFilter.Linear"/>.</param>
+        /// <param name="textureMagFilter">The magnification filter used when scaling the texture up. Defaults to <see cref="TextureMagFilter.Linear"/>.</param>
+        /// <returns>A fully initialized <see cref="Texture"/> instance representing the 2D texture array containing all successfully uploaded layers.</returns>
+        /// <exception cref="ArgumentException">Thrown if <paramref name="paths"/> is <c>null</c> or contains zero elements.</exception>
+        /// <exception cref="InvalidOperationException">Thrown if any subsequent image's dimensions do not match the width and height of the first image in the batch.</exception>
+        public static Texture LoadTextureArray(
+            string[] paths,
+            bool parallel = false,
+            bool expandToFit = false,
+            bool flipVertical = true,
+            PixelInternalFormat pixelInternalFormat = PixelInternalFormat.Rgba,
+            PixelFormat pixelFormat = PixelFormat.Rgba,
+            PixelType type = PixelType.UnsignedByte,
+            TextureWrapMode textureSWrapMode = TextureWrapMode.Repeat,
+            TextureWrapMode textureTWrapMode = TextureWrapMode.Repeat,
+            TextureMinFilter textureMinFilter = TextureMinFilter.Linear,
+            TextureMagFilter textureMagFilter = TextureMagFilter.Linear)
+        {
+            if (paths == null || paths.Length == 0)
+                throw new ArgumentException("At least one path must be provided to create a Texture Array.");
+
+            Logger.BeginTimingBlock();
+
+            PixelMapping mapping = pixelFormat == PixelFormat.Rgb ? PixelMapping.RGB : PixelMapping.RGBA;
+            string textureName = $"TextureArray_{paths.Length}_Layers";
+
+            int targetWidth = 0;
+            int targetHeight = 0;
+
+            if (expandToFit)
+            {
+                int maxW = 0;
+                int maxH = 0;
+
+                foreach (string path in paths)
+                {
+                    using MagickImage pinger = new();
+                    pinger.Ping(path);
+
+                    if (pinger.Width > maxW) maxW = (int)pinger.Width;
+                    if (pinger.Height > maxH) maxH = (int)pinger.Height;
+                }
+
+                targetWidth = maxW;
+                targetHeight = maxH;
+            }
+            else
+            {
+                using MagickImage firstPinger = new(paths[0]);
+                targetWidth = (int)firstPinger.Width;
+                targetHeight = (int)firstPinger.Height;
+            }
+
+            // Allocate the texture array on the GPU once
+            Texture arrayTexture = LoadFromSize(
+                width: targetWidth,
+                height: targetHeight,
+                depth: paths.Length,
+                target: TextureTarget.Texture2DArray,
+                pixelInternalFormat: pixelInternalFormat,
+                pixelFormat: pixelFormat,
+                pixelType: type,
+                textureSWrapMode: textureSWrapMode,
+                textureTWrapMode: textureTWrapMode,
+                textureMinFilter: textureMinFilter,
+                textureMagFilter: textureMagFilter,
+                name: textureName
+            );
+
+            int bytesPerComponent = GetBytesPerComponent(type);
+            int components = GetComponentsCount(pixelFormat);
+            int layerSizeBytes = targetWidth * targetHeight * components * bytesPerComponent;
+            int totalBufferSize = layerSizeBytes * paths.Length;
+
+            IntPtr nativeBuffer = Marshal.AllocHGlobal(totalBufferSize);
+
+            try
+            {
+                Action<int> processImageAction = i =>
+                {
+                    using var image = new MagickImage(File.ReadAllBytes(paths[i]));
+
+                    if ((image.Width != targetWidth || image.Height != targetHeight) && !expandToFit)
+                    {
+                        throw new InvalidOperationException($"Image at index {i} ({paths[i]}) does not match target dimensions of {targetWidth}x{targetHeight}.");
+                    }
+
+                    if (flipVertical)
+                    {
+                        image.Flip();
+                    }
+
+                    if (expandToFit)
+                    {
+                        image.Extent((uint)targetWidth, (uint)targetHeight, Gravity.Northwest, MagickColors.Transparent);
+                    }
+
+                    IntPtr layerDestination = IntPtr.Add(nativeBuffer, i * layerSizeBytes);
+
+                    using IUnsafePixelCollection<byte> pixels = image.GetPixelsUnsafe();
+
+                    unsafe
+                    {
+                        byte* nativePointer = (byte*)pixels.GetAreaPointer(0, 0, image.Width, image.Height);
+
+                        // Use MemoryCopy instead of BlockCopy for raw unmanaged pointers (void*)
+                        System.Buffer.MemoryCopy(
+                            source: nativePointer,
+                            destination: layerDestination.ToPointer(),
+                            destinationSizeInBytes: layerSizeBytes,
+                            sourceBytesToCopy: layerSizeBytes
+                        );
+                    }
+                };
+
+                if (parallel)
+                {
+                    Parallel.For(0, paths.Length, processImageAction);
+                }
+                else
+                {
+                    for (int i = 0; i < paths.Length; i++)
+                    {
+                        processImageAction(i);
+                    }
+                }
+
+                // Phase 2: Create a ReadOnlySpan over each native layer slice and upload to GPU sequentially
+                unsafe
+                {
+                    for (int i = 0; i < paths.Length; i++)
+                    {
+                        IntPtr layerPtr = IntPtr.Add(nativeBuffer, i * layerSizeBytes);
+                        ReadOnlySpan<byte> layerSpan = new ReadOnlySpan<byte>(layerPtr.ToPointer(), layerSizeBytes);
+                        arrayTexture.SetLayerData(i, layerSpan);
+                    }
+                }
+            }
+            finally
+            {
+                // Clean up unmanaged memory block
+                Marshal.FreeHGlobal(nativeBuffer);
+            }
+
+            new LogBuilder()
+                .Write("Loaded Texture Array ")
+                .Write(arrayTexture.Handle)
+                .Write($", named {textureName} ")
+                .Write($"with {paths.Length} layers sized {arrayTexture.Width}x{arrayTexture.Height}x{paths.Length} in {Logger.EndTimingBlockFormatted()}")
+                .Log();
+
+            return arrayTexture;
         }
     }
 }

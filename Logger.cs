@@ -7,6 +7,10 @@
             get;
             set => field = TextWriter.Synchronized(value ?? TextWriter.Null);
         } = TextWriter.Synchronized(TextWriter.Null);
+        public static void LogThreadSafe(string info)
+        {
+            LogWithoutGLErrorCheck(info);
+        }
         public static unsafe void Log(string info)
         {
             OpenTK.Windowing.GraphicsLibraryFramework.Window* window = OpenTK.Windowing.GraphicsLibraryFramework.GLFW.GetCurrentContext();

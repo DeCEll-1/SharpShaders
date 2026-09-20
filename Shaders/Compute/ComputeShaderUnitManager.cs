@@ -25,6 +25,12 @@ namespace SharpShaders.Shaders.Compute
             /// <summary>Internal sized format matching the GLSL texture declaration.</summary>
             public SizedInternalFormat Format;
 
+            /// <summary>Indicates whether the entire layer stack (true) or a single slice (false) is bound.</summary>
+            public bool Layered;
+
+            /// <summary>The specific layer index to bind when <see cref="Layered"/> is false.</summary>
+            public int Layer;
+
             /// <summary>
             /// Creates an image binding configuration.
             /// </summary>
@@ -32,17 +38,23 @@ namespace SharpShaders.Shaders.Compute
             /// <param name="texture">OpenGL texture handle ID.</param>
             /// <param name="access">Shader read/write access mode.</param>
             /// <param name="format">Internal pixel component format.</param>
+            /// <param name="layered">Whether to bind the entire texture layer stack.</param>
+            /// <param name="layer">The specific layer index to bind if not layered.</param>
             public ImageBinding(
                 int unit,
                 int texture,
                 TextureAccess access,
-                SizedInternalFormat format
+                SizedInternalFormat format,
+                bool layered = false,
+                int layer = 0
             )
             {
                 Unit = unit;
                 Texture = texture;
                 Access = access;
                 Format = format;
+                Layered = layered;
+                Layer = layer;
             }
         }
 
@@ -68,17 +80,19 @@ namespace SharpShaders.Shaders.Compute
         /// <param name="unit">The GLSL <c>binding = unit</c> index.</param>
         /// <param name="access">Memory access type (<c>ReadWrite</c>, <c>ReadOnly</c>, or <c>WriteOnly</c>).</param>
         /// <param name="format">Matching sized internal texture format.</param>
+        /// <param name="layered">True to bind all layers (e.g., for 2D arrays / 3D textures); false for a single slice.</param>
+        /// <param name="layer">The specific layer index to bind if <paramref name="layered"/> is false.</param>
         public ComputeShaderUnitManager SetImageTexture(
             int texture,
             int unit,
             TextureAccess access = TextureAccess.ReadWrite,
-            SizedInternalFormat format = SizedInternalFormat.Rgba32f
+            SizedInternalFormat format = SizedInternalFormat.Rgba32f,
+            bool layered = false,
+            int layer = 0
         )
         {
-            // Remove any existing binding on that unit to avoid duplicates
             imageBindings.RemoveAll(b => b.Unit == unit);
-
-            imageBindings.Add(new ImageBinding(unit, texture, access, format));
+            imageBindings.Add(new ImageBinding(unit, texture, access, format, layered, layer));
             return this;
         }
 
@@ -90,13 +104,13 @@ namespace SharpShaders.Shaders.Compute
             foreach (var binding in imageBindings)
             {
                 GL.BindImageTexture(
-                    binding.Unit, // Image unit index, corresponds to 'binding = unit' in GLSL
-                    binding.Texture, // OpenGL texture handle
-                    0, // Mipmap level
-                    false, // Not layered
-                    0, // Layer index
-                    binding.Access, // WriteOnly, ReadOnly, or ReadWrite
-                    binding.Format // Must match texture's internal format
+                    binding.Unit,
+                    binding.Texture,
+                    0,
+                    binding.Layered,
+                    binding.Layer,
+                    binding.Access,
+                    binding.Format
                 );
             }
             return this;

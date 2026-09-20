@@ -219,8 +219,14 @@ namespace SharpShaders.Shaders.Compute
         public void Dispatch(int x, int y, int z)
         {
             Use();
+            Logger.BeginTimingBlock();
             GL.DispatchCompute(x, y, z);
-            Logger.Log($"Dispatched {Handle}, named {Name} for {x}, {y}, {z} with group size {groupSize.ToString()}");
+            new LogBuilder()
+                .Write("Dispatched Compute Shader ")
+                .Write(Handle)
+                .Write((Name != "" ? $", named {Name}" : "") + " ")
+                .Write($"for {x}, {y}, {z} with group size {groupSize} in {Logger.EndTimingBlockFormatted()}")
+                .Log();
         }
 
         /// <summary>

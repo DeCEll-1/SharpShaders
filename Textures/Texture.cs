@@ -1,4 +1,5 @@
 ﻿using ImageMagick;
+using System.Runtime.InteropServices;
 
 namespace SharpShaders.Textures
 {
@@ -27,6 +28,11 @@ namespace SharpShaders.Textures
         /// The height of the texture in pixels.
         /// </summary>
         public int Height;
+
+        /// <summary>
+        /// The depth of the texture (used for Texture3D or the number of layers in a Texture2DArray).
+        /// </summary>
+        public int Depth { get; set; } = 1;
 
         /// <summary>
         /// Gets a value indicating whether this instance has been disposed.
@@ -81,29 +87,30 @@ namespace SharpShaders.Textures
         #endregion
 
         /// <summary>
-        /// Downloads and returns the raw pixel byte array directly from GPU memory.
-        /// Supports byte, float, single-channel, and multi-channel textures.
+        /// Downloads raw pixel data directly into native unmanaged memory.
+        /// Caller is responsible for freeing the returned IntPtr using Marshal.FreeHGlobal.
         /// </summary>
-        public byte[] GetBytes()
+        public IntPtr GetNativeBytes(out int bufferSize)
         {
             int bytesPerComponent = GetBytesPerComponent(this.PixelType);
             int components = GetComponentsCount(this.PixelFormat);
             int bytesPerPixel = components * bytesPerComponent;
-
-            byte[] output = new byte[Width * Height * bytesPerPixel];
+            bufferSize = Width * Height * Depth * bytesPerPixel;
 
             Bind();
+
+            IntPtr nativeBuffer = Marshal.AllocHGlobal(bufferSize);
 
             // Prevent row alignment issues for odd width textures or single-channel data
             GL.GetInteger(GetPName.PackAlignment, out int previousAlignment);
             GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
 
-            GL.GetTexImage(this.Target, 0, this.PixelFormat, this.PixelType, output);
+            GL.GetTexImage(this.Target, 0, this.PixelFormat, this.PixelType, nativeBuffer);
 
             // Restore previous alignment state
             GL.PixelStore(PixelStoreParameter.PackAlignment, previousAlignment);
 
-            return output;
+            return nativeBuffer;
         }
 
         /// <summary>
@@ -111,9 +118,29 @@ namespace SharpShaders.Textures
         /// </summary>
         public void SaveToFile(string filePath)
         {
-            byte[] rawBytes = GetBytes();
+            IntPtr nativeBuffer = GetNativeBytes(out int bufferSize);
 
-            // Use PixelReadSettings to specify dimensions, storage type, and channel mapping
+            try
+            {
+                unsafe
+                {
+                    ReadOnlySpan<byte> pixelSpan = new ReadOnlySpan<byte>(nativeBuffer.ToPointer(), bufferSize);
+                    SaveBufferToFile(pixelSpan, filePath);
+                }
+                Logger.Log($"Saved Texture {Handle} as {filePath}");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(nativeBuffer);
+            }
+        }
+
+
+        /// <summary>
+        /// Core helper that converts a raw pixel memory buffer span into an ImageMagick image and saves it to disk.
+        /// </summary>
+        private void SaveBufferToFile(ReadOnlySpan<byte> pixelSpan, string filePath)
+        {
             var settings = new PixelReadSettings(
                 (uint)Width,
                 (uint)Height,
@@ -121,10 +148,8 @@ namespace SharpShaders.Textures
                 GetPixelMapping(this.PixelFormat)
             );
 
-            // Read raw pixel bytes using PixelReadSettings
-            using var image = new MagickImage(rawBytes, settings);
+            using var image = new MagickImage(pixelSpan, settings);
 
-            // Normalize high dynamic range float data (like R32F) down to visible display bounds
             if (this.PixelType == PixelType.Float || this.PixelType == PixelType.HalfFloat)
             {
                 image.Normalize();
@@ -133,12 +158,136 @@ namespace SharpShaders.Textures
             image.Flip();
 
             image.Format = (filePath.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                            filePath.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
+                             filePath.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase))
                 ? MagickFormat.Jpeg
                 : MagickFormat.Png;
 
             image.Write(filePath);
-            Logger.Log($"Saved Texture {Handle} as {filePath}");
+        }
+
+        /// <summary>
+        /// Uploads raw pixel data to a specific layer index of a Texture2DArray.
+        /// </summary>
+        public unsafe void SetLayerData(int layerIndex, ReadOnlySpan<byte> pixels)
+        {
+            if (this.Target != TextureTarget.Texture2DArray)
+                throw new InvalidOperationException("SetLayerData is only valid for TextureTarget.Texture2DArray.");
+
+            if (layerIndex < 0 || layerIndex >= this.Depth)
+                throw new ArgumentOutOfRangeException(nameof(layerIndex), $"Layer {layerIndex} is out of bounds for depth {this.Depth}.");
+
+            Bind();
+
+            // Safely pin the span's memory reference without allocations or array copying
+            fixed (byte* ptr = &MemoryMarshal.GetReference(pixels))
+            {
+                GL.TexSubImage3D(
+                    this.Target,
+                    0,                  // level
+                    0, 0, layerIndex,   // xoffset, yoffset, zoffset
+                    this.Width, this.Height, 1, // width, height, depth (1 layer being updated)
+                    this.PixelFormat,
+                    this.PixelType,
+                    (IntPtr)ptr
+                );
+            }
+        }
+
+        /// <summary>
+        /// Exports a specific layer of a Texture2DArray to an image file on disk.
+        /// </summary>
+        public void SaveLayerToFile(int layerIndex, string filePath)
+        {
+            if (this.Target != TextureTarget.Texture2DArray)
+                throw new InvalidOperationException("SaveLayerToFile is only valid for TextureTarget.Texture2DArray.");
+
+            if (layerIndex < 0 || layerIndex >= this.Depth)
+                throw new ArgumentOutOfRangeException(nameof(layerIndex), $"Layer {layerIndex} is out of bounds for depth {this.Depth}.");
+
+            IntPtr fullBuffer = GetNativeBytes(out int totalBufferSize);
+
+            int bytesPerComponent = GetBytesPerComponent(this.PixelType);
+            int components = GetComponentsCount(this.PixelFormat);
+            int layerSizeBytes = Width * Height * components * bytesPerComponent;
+
+            // Calculate memory offset for the specific layer slice
+            IntPtr layerBuffer = IntPtr.Add(fullBuffer, layerIndex * layerSizeBytes);
+
+            try
+            {
+                unsafe
+                {
+                    // Wrap the specific layer's unmanaged memory into a span
+                    ReadOnlySpan<byte> layerSpan = new ReadOnlySpan<byte>(layerBuffer.ToPointer(), layerSizeBytes);
+                    SaveBufferToFile(layerSpan, filePath);
+                }
+                Logger.Log($"Saved Texture {Handle} Layer {layerIndex} as {filePath}");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(fullBuffer);
+            }
+        }
+
+        /// <summary>
+        /// Exports all layers of a Texture2DArray to corresponding image files on disk.
+        /// </summary>
+        public void SaveLayersToFiles(string[] filePaths, bool parallel = true)
+        {
+            if (this.Target != TextureTarget.Texture2DArray)
+                throw new InvalidOperationException("SaveLayersToFiles is only valid for TextureTarget.Texture2DArray.");
+
+            if (filePaths == null)
+                throw new ArgumentNullException(nameof(filePaths));
+
+            int layersToSave = Math.Min(this.Depth, filePaths.Length);
+
+            // Fetch the entire texture array buffer from the GPU once
+            IntPtr fullBuffer = GetNativeBytes(out int totalBufferSize);
+
+            int bytesPerComponent = GetBytesPerComponent(this.PixelType);
+            int components = GetComponentsCount(this.PixelFormat);
+            int layerSizeBytes = Width * Height * components * bytesPerComponent;
+
+            try
+            {
+                unsafe
+                {
+                    if (parallel)
+                    {
+                        Parallel.For(0, layersToSave, i =>
+                        {
+                            if (string.IsNullOrWhiteSpace(filePaths[i]))
+                                return;
+
+                            IntPtr layerBuffer = IntPtr.Add(fullBuffer, i * layerSizeBytes);
+                            ReadOnlySpan<byte> layerSpan = new ReadOnlySpan<byte>(layerBuffer.ToPointer(), layerSizeBytes);
+
+                            SaveBufferToFile(layerSpan, filePaths[i]);
+                            Logger.LogThreadSafe($"Saved Texture {Handle} Layer {i} as {filePaths[i]}");
+                        });
+                    }
+                    else
+                    {
+                        for (int i = 0; i < layersToSave; i++)
+                        {
+                            if (string.IsNullOrWhiteSpace(filePaths[i]))
+                                return;
+
+                            IntPtr layerBuffer = IntPtr.Add(fullBuffer, i * layerSizeBytes);
+                            ReadOnlySpan<byte> layerSpan = new ReadOnlySpan<byte>(layerBuffer.ToPointer(), layerSizeBytes);
+
+                            SaveBufferToFile(layerSpan, filePaths[i]);
+                            Logger.LogThreadSafe($"Saved Texture {Handle} Layer {i} as {filePaths[i]}");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                // Ensure the full buffer allocated by GetNativeBytes is always cleaned up
+                Marshal.FreeHGlobal(fullBuffer);
+            }
         }
 
         #region disposal
